@@ -45,6 +45,13 @@ ENV NODE_ENV=production
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
+    git \
+    curl \
+  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -61,9 +68,15 @@ RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"'
   && chmod +x /usr/local/bin/openclaw
 
 COPY src ./src
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Copy the full project (including .git) for development from deployed instance
+COPY . /project
 
 # The wrapper listens on this port.
 ENV OPENCLAW_PUBLIC_PORT=8080
 ENV PORT=8080
 EXPOSE 8080
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "src/server.js"]
