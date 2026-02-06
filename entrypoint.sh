@@ -25,5 +25,12 @@ if [ -n "$GITHUB_EMAIL" ]; then
   git config --global user.email "$GITHUB_EMAIL" || true
 fi
 
+# QMD: initialize a markdown collection for this workspace (best-effort)
+# This enables fast local keyword search without expanding context.
+if command -v qmd >/dev/null 2>&1; then
+  qmd collection add /data/workspace --name workspace --mask "**/*.md" 2>/dev/null || true
+  qmd context add qmd://workspace "OpenClaw workspace notes, memory, docs, and project files" 2>/dev/null || true
+fi
+
 # Execute the main command
 exec "$@"
