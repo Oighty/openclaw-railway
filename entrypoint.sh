@@ -8,6 +8,10 @@ export HOME="${HOME:-/root}"
 # Prefer GitHub CLI's credential helper over embedding a token in a URL rewrite.
 # Best-effort: the container should still start even if auth config fails.
 if [ -n "$GITHUB_PAT" ]; then
+  # Many gh commands will also accept GH_TOKEN directly.
+  # Set it so gh can authenticate even if its local keychain/config isn't initialized yet.
+  export GH_TOKEN="${GH_TOKEN:-$GITHUB_PAT}"
+
   # Login for GitHub CLI (stores auth under $HOME/.config/gh)
   printf "%s" "$GITHUB_PAT" | gh auth login --hostname github.com --with-token 2>/dev/null || true
 
