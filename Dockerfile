@@ -71,8 +71,8 @@ COPY src ./src
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Copy the full project (including .git) for development from deployed instance
-COPY . /project
+# NOTE: Do not copy the full build context into the runtime image.
+# It often excludes .git anyway (CI exports), increases image size, and can leak build-time artifacts.
 
 # The wrapper listens on this port.
 ENV OPENCLAW_PUBLIC_PORT=8080
