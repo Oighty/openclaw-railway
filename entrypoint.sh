@@ -1,23 +1,28 @@
 #!/bin/bash
 set -e
 
-# Configure git credentials if GITHUB_PAT is provided
-if [ -n "$GITHUB_PAT" ]; then
-  # Configure git to use the PAT for GitHub authentication
-  git config --global url."https://${GITHUB_PAT}@github.com/".insteadOf "https://github.com/"
+# Ensure HOME is set; gh/git config writes to $HOME.
+export HOME="${HOME:-/root}"
 
-  # Authenticate gh CLI with the PAT
-  echo "$GITHUB_PAT" | gh auth login --with-token 2>/dev/null || true
+# Configure GitHub auth if GITHUB_PAT is provided.
+# Prefer GitHub CLI's credential helper over embedding a token in a URL rewrite.
+# Best-effort: the container should still start even if auth config fails.
+if [ -n "$GITHUB_PAT" ]; then
+  # Login for GitHub CLI (stores auth under $HOME/.config/gh)
+  printf "%s" "$GITHUB_PAT" | gh auth login --hostname github.com --with-token 2>/dev/null || true
+
+  # Configure git to use gh as a credential helper for github.com
+  gh auth setup-git --hostname github.com 2>/dev/null || true
 fi
 
 # Configure git user name
 if [ -n "$GITHUB_NAME" ]; then
-  git config --global user.name "$GITHUB_NAME"
+  git config --global user.name "$GITHUB_NAME" || true
 fi
 
 # Configure git user email
 if [ -n "$GITHUB_EMAIL" ]; then
-  git config --global user.email "$GITHUB_EMAIL"
+  git config --global user.email "$GITHUB_EMAIL" || true
 fi
 
 # Execute the main command
