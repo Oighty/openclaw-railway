@@ -968,7 +968,13 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   if (!SETUP_PASSWORD) {
     console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
   }
-  // Don't start gateway unless configured; proxy will ensure it starts.
+  // Start the gateway eagerly when configured so Telegram (and other channels)
+  // work even if no one hits the HTTP proxy routes.
+  if (isConfigured()) {
+    ensureGatewayRunning().catch((err) => {
+      console.error(`[wrapper] failed to start gateway on boot: ${String(err)}`);
+    });
+  }
 });
 
 server.on("upgrade", async (req, socket, head) => {
