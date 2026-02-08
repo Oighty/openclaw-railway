@@ -221,6 +221,92 @@ function requireSetupAuth(req, res, next) {
   return next();
 }
 
+// --- Tasks GUI auth + storage ---
+
+// Protect /tasks with a user-provided password.
+// Prefer TASKS_PASSWORD; fall back to SETUP_PASSWORD for convenience.
+const TASKS_PASSWORD = process.env.TASKS_PASSWORD?.trim() || SETUP_PASSWORD;
+
+function requireTasksAuth(req, res, next) {
+  if (!TASKS_PASSWORD) {
+    return res
+      .status(500)
+      .type("text/plain")
+      .send("TASKS_PASSWORD is not set. Set it (or SETUP_PASSWORD) before using /tasks.");
+  }
+
+  const header = req.headers.authorization || "";
+  const [scheme, encoded] = header.split(" ");
+  if (scheme !== "Basic" || !encoded) {
+    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Tasks"');
+    return res.status(401).send("Auth required");
+  }
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  const idx = decoded.indexOf(":");
+  const password = idx >= 0 ? decoded.slice(idx + 1) : "";
+  if (password !== TASKS_PASSWORD) {
+    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Tasks"');
+    return res.status(401).send("Invalid password");
+  }
+  return next();
+}
+
+function tasksJsonPath() {
+  return path.join(WORKSPACE_DIR, "tasks.json");
+}
+
+function readTasksState() {
+  const p = tasksJsonPath();
+  try {
+    if (!fs.existsSync(p)) {
+      return {
+        schemaVersion: 1,
+        updatedAt: new Date().toISOString(),
+        tasks: [],
+      };
+    }
+    const raw = fs.readFileSync(p, "utf8");
+    const j = JSON.parse(raw);
+    if (!j || typeof j !== "object") throw new Error("Invalid JSON");
+    if (!Array.isArray(j.tasks)) j.tasks = [];
+    if (!j.schemaVersion) j.schemaVersion = 1;
+    if (!j.updatedAt) j.updatedAt = new Date().toISOString();
+    return j;
+  } catch (err) {
+    // If something corrupts the file, keep the server alive and surface the error to the UI.
+    return {
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      tasks: [],
+      _error: `Failed to read tasks.json: ${String(err)}`,
+    };
+  }
+}
+
+function writeTasksState(state) {
+  const p = tasksJsonPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const next = {
+    ...state,
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+  };
+  const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tmp, p);
+  return next;
+}
+
+function newTaskId() {
+  // Stable-ish, human-friendly ids.
+  const d = new Date();
+  const y = String(d.getUTCFullYear());
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const rand = crypto.randomBytes(3).toString("hex");
+  return `t-${y}${m}${day}-${rand}`;
+}
+
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
@@ -931,6 +1017,226 @@ app.post("/setup/import", requireSetupAuth, async (req, res) => {
   }
 });
 
+// --- Tasks GUI (GTD + Weekly) ---
+
+app.get("/tasks/app.js", requireTasksAuth, (_req, res) => {
+  res.type("application/javascript");
+  res.send(fs.readFileSync(path.join(process.cwd(), "src", "tasks-app.js"), "utf8"));
+});
+
+app.get("/tasks", requireTasksAuth, (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tasks</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --panel: #0f172a;
+      --card: #111827;
+      --muted: #94a3b8;
+      --text: #e5e7eb;
+      --line: rgba(255,255,255,0.10);
+      --accent: #38bdf8;
+      --good: #34d399;
+      --warn: #fbbf24;
+    }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
+    a { color: var(--accent); text-decoration: none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(56,189,248,0.08), rgba(0,0,0,0)); }
+    .title { font-weight: 800; letter-spacing: 0.2px; }
+    .muted { color: var(--muted); }
+    .wrap { display:flex; height: calc(100vh - 52px); }
+    .nav { width: 240px; border-right: 1px solid var(--line); padding: 12px; background: var(--panel); }
+    .nav button { width: 100%; text-align:left; padding: 10px 10px; margin: 6px 0; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text); cursor:pointer; }
+    .nav button.active { background: rgba(56,189,248,0.10); border-color: rgba(56,189,248,0.25); }
+    .main { flex:1; padding: 16px; overflow:auto; }
+    .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+    .controls input, .controls select { background: #0b1222; border: 1px solid var(--line); color: var(--text); padding: 10px; border-radius: 10px; }
+    .btn { border: 1px solid var(--line); background: #0b1222; color: var(--text); border-radius: 10px; padding: 10px 12px; cursor:pointer; font-weight: 650; }
+    .btn.primary { background: rgba(56,189,248,0.16); border-color: rgba(56,189,248,0.35); }
+    .btn.danger { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.35); }
+    .list { margin-top: 12px; }
+    .task { display:flex; gap: 10px; align-items:flex-start; padding: 10px 10px; border-radius: 12px; border: 1px solid var(--line); margin: 8px 0; background: rgba(255,255,255,0.02); }
+    .task:hover { background: rgba(255,255,255,0.03); }
+    .task .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .task .titleText { font-weight: 650; }
+    .pill { display:inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-right: 6px; }
+    .pill.due { border-color: rgba(251,191,36,0.4); color: #fde68a; }
+    .pill.done { border-color: rgba(52,211,153,0.35); color: #a7f3d0; }
+    .split { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 980px) { .wrap { display:block; height:auto; } .nav { width:auto; border-right:none; border-bottom: 1px solid var(--line);} .split { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <div class="title">Tasks</div>
+      <div class="muted">GTD-style lists + a Weekly view. Data is stored in <code style="background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:8px;">${tasksJsonPath()}</code>.</div>
+    </div>
+    <div class="row">
+      <a href="/openclaw" target="_blank">OpenClaw</a>
+      <button class="btn" id="reload">Reload</button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="nav">
+      <button data-view="week" class="active">Weekly</button>
+      <button data-view="next">Next Actions</button>
+      <button data-view="waiting">Waiting For</button>
+      <button data-view="someday">Someday/Maybe</button>
+      <button data-view="done">Done</button>
+      <div style="margin-top:10px" class="muted">Tip: keep “Next Actions” ruthlessly small. Put ideas in Someday.</div>
+    </div>
+
+    <div class="main">
+      <div class="card controls">
+        <div class="row">
+          <input id="newTitle" placeholder="New task (verb phrase)…" style="min-width: 320px; flex: 1" />
+          <select id="newList">
+            <option value="week">Weekly</option>
+            <option value="next">Next</option>
+            <option value="waiting">Waiting</option>
+            <option value="someday">Someday</option>
+          </select>
+          <select id="newCtx">
+            <option value="">ctx…</option>
+            <option value="work">work</option>
+            <option value="home">home</option>
+            <option value="errand">errand</option>
+            <option value="phone">phone</option>
+          </select>
+          <input id="newProject" placeholder="project…" style="min-width: 180px" />
+          <input id="newArea" placeholder="area…" style="min-width: 160px" />
+          <input id="newDue" type="date" />
+          <button class="btn primary" id="add">Add</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span class="muted" id="status">Loading…</span>
+        </div>
+      </div>
+
+      <div class="split" style="margin-top: 12px">
+        <div class="card">
+          <div class="row" style="justify-content: space-between">
+            <div>
+              <div class="title" style="font-size: 16px">View</div>
+              <div class="muted" id="viewHint"></div>
+            </div>
+            <div class="row">
+              <button class="btn" id="weekPrev">◀</button>
+              <button class="btn" id="weekToday">This week</button>
+              <button class="btn" id="weekNext">▶</button>
+            </div>
+          </div>
+          <div class="list" id="list"></div>
+        </div>
+        <div class="card">
+          <div class="title" style="font-size: 16px">Weekly focus</div>
+          <div class="muted">A short, deliberate list. Aim for outcomes, not volume.</div>
+          <div style="margin-top:10px" id="weeklySummary"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/tasks/app.js"></script>
+</body>
+</html>`);
+});
+
+app.get("/tasks/api/state", requireTasksAuth, async (_req, res) => {
+  const state = readTasksState();
+  res.json({ ok: true, state });
+});
+
+app.post("/tasks/api/task", requireTasksAuth, async (req, res) => {
+  const payload = req.body || {};
+  const title = String(payload.title || "").trim();
+  if (!title) return res.status(400).json({ ok: false, error: "Missing title" });
+
+  const list = String(payload.list || "next").trim();
+  const allowedLists = new Set(["week", "next", "waiting", "someday", "done"]);
+  if (!allowedLists.has(list)) return res.status(400).json({ ok: false, error: "Invalid list" });
+
+  const ctx = payload.ctx ? String(payload.ctx).trim() : "";
+  const project = payload.project ? String(payload.project).trim() : "";
+  const area = payload.area ? String(payload.area).trim() : "";
+  const due = payload.due ? String(payload.due).trim() : "";
+
+  const state = readTasksState();
+  const now = new Date().toISOString();
+  const t = {
+    id: newTaskId(),
+    title,
+    list,
+    ctx,
+    project,
+    area,
+    due: due || null,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    deletedAt: null,
+    notes: payload.notes ? String(payload.notes) : "",
+  };
+  state.tasks.push(t);
+  const next = writeTasksState(state);
+  res.json({ ok: true, task: t, state: next });
+});
+
+app.put("/tasks/api/task/:id", requireTasksAuth, async (req, res) => {
+  const id = String(req.params.id || "");
+  const patch = req.body || {};
+  const state = readTasksState();
+  const t = (state.tasks || []).find((x) => x && x.id === id);
+  if (!t) return res.status(404).json({ ok: false, error: "Task not found" });
+
+  const now = new Date().toISOString();
+  if (typeof patch.title === "string") t.title = patch.title.trim();
+  if (typeof patch.list === "string") t.list = patch.list.trim();
+  if (typeof patch.ctx === "string") t.ctx = patch.ctx.trim();
+  if (typeof patch.project === "string") t.project = patch.project.trim();
+  if (typeof patch.area === "string") t.area = patch.area.trim();
+  if (typeof patch.due === "string") t.due = patch.due.trim() || null;
+  if (typeof patch.notes === "string") t.notes = patch.notes;
+
+  if (patch.complete === true) {
+    t.list = "done";
+    t.completedAt = t.completedAt || now;
+  }
+  if (patch.complete === false) {
+    t.completedAt = null;
+    if (t.list === "done") t.list = "next";
+  }
+
+  if (patch.delete === true) {
+    t.deletedAt = t.deletedAt || now;
+  }
+  if (patch.delete === false) {
+    t.deletedAt = null;
+  }
+
+  t.updatedAt = now;
+  const next = writeTasksState(state);
+  res.json({ ok: true, task: t, state: next });
+});
+
+// A careful migration helper: reads Markdown GTD lists under WORKSPACE_DIR/tasks and writes tasks.json.
+app.post("/tasks/api/migrate", requireTasksAuth, async (_req, res) => {
+  try {
+    const mod = await import(path.join(process.cwd(), "scripts", "migrate-tasks-to-json.js"));
+    const result = await mod.migrate({ workspaceDir: WORKSPACE_DIR });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Proxy everything else to the gateway.
 const proxy = httpProxy.createProxyServer({
   target: GATEWAY_TARGET,
@@ -968,13 +1274,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   if (!SETUP_PASSWORD) {
     console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
   }
-  // Start the gateway eagerly when configured so Telegram (and other channels)
-  // work even if no one hits the HTTP proxy routes.
-  if (isConfigured()) {
-    ensureGatewayRunning().catch((err) => {
-      console.error(`[wrapper] failed to start gateway on boot: ${String(err)}`);
-    });
-  }
+  // Don't start gateway unless configured; proxy will ensure it starts.
 });
 
 server.on("upgrade", async (req, socket, head) => {
