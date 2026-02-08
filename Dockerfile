@@ -48,6 +48,9 @@ RUN apt-get update \
     git \
     curl \
     sqlite3 \
+    build-essential \
+    pkg-config \
+    libssl-dev \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
@@ -59,6 +62,11 @@ RUN apt-get update \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 RUN bun install -g github:tobi/qmd
+
+# Install Rust toolchain + cryo CLI
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install --locked cryo_cli
 
 WORKDIR /app
 
