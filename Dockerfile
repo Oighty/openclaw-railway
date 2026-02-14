@@ -61,7 +61,8 @@ RUN apt-get update \
 # Install Bun + QMD (local file search/index tool)
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
-RUN bun install -g github:tobi/qmd
+RUN bun install -g github:tobi/qmd \
+  && qmd --help >/dev/null
 
 # Install Rust toolchain + cryo CLI
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal --default-toolchain stable
