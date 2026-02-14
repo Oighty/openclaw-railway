@@ -74,7 +74,7 @@ RUN rustup update stable \
   && rustc --version \
   && cargo --version
 # Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
-RUN cargo install --git https://github.com/paradigmxyz/cryo --locked --package cryo_cli
+RUN cargo install --git https://github.com/paradigmxyz/cryo --locked cryo_cli
 
 # Install Claude Code CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
