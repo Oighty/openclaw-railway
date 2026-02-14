@@ -84,8 +84,8 @@ RUN cargo install --git https://github.com/paradigmxyz/cryo --locked --package c
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.claude/local/bin:${PATH}"
 
-# Install ralphy-cli (coding agent retry-loop wrapper)
-RUN npm install -g ralphy-cli
+# Install ralphy-cli and OpenAI Codex CLI
+RUN npm install -g ralphy-cli @openai/codex
 
 WORKDIR /app
 
