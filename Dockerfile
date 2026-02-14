@@ -56,6 +56,7 @@ RUN apt-get update \
     build-essential \
     pkg-config \
     libssl-dev \
+    tmux \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
@@ -78,6 +79,13 @@ RUN rustup update stable \
   && cargo --version
 # Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
 RUN cargo install --git https://github.com/paradigmxyz/cryo --locked --package cryo_cli
+
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.claude/local/bin:${PATH}"
+
+# Install ralphy-cli (coding agent retry-loop wrapper)
+RUN npm install -g ralphy-cli
 
 WORKDIR /app
 
