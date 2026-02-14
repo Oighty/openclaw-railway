@@ -64,9 +64,14 @@ ENV PATH="/root/.bun/bin:${PATH}"
 RUN bun install -g github:tobi/qmd
 
 # Install Rust toolchain + cryo CLI
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo install --locked cryo_cli
+RUN rustup update stable \
+  && rustup default stable \
+  && rustc --version \
+  && cargo --version
+# Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
+RUN cargo install --git https://github.com/paradigmxyz/cryo --locked --package cryo_cli
 
 WORKDIR /app
 
