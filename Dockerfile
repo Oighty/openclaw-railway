@@ -17,7 +17,6 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable \
-  && npm install -g pnpm \
   && pnpm --version
 
 WORKDIR /openclaw
@@ -44,9 +43,6 @@ RUN pnpm ui:install && pnpm ui:build
 FROM node:22-bookworm
 ENV NODE_ENV=production
 
-RUN npm install -g pnpm \
-  && pnpm --version
-
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -56,6 +52,7 @@ RUN apt-get update \
     build-essential \
     pkg-config \
     libssl-dev \
+    tmux \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
@@ -78,6 +75,13 @@ RUN rustup update stable \
   && cargo --version
 # Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
 RUN cargo install --git https://github.com/paradigmxyz/cryo --locked --package cryo_cli
+
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.claude/local/bin:${PATH}"
+
+# Install ralphy-cli and OpenAI Codex CLI
+RUN npm install -g ralphy-cli @openai/codex
 
 WORKDIR /app
 
