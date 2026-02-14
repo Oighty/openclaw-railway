@@ -1274,7 +1274,12 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   if (!SETUP_PASSWORD) {
     console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
   }
-  // Don't start gateway unless configured; proxy will ensure it starts.
+  // Start gateway immediately if already configured (don't wait for first request).
+  if (isConfigured()) {
+    ensureGatewayRunning().catch((err) => {
+      console.error("[wrapper] Failed to auto-start gateway:", err);
+    });
+  }
 });
 
 server.on("upgrade", async (req, socket, head) => {
