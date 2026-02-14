@@ -17,7 +17,6 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable \
-  && npm install -g pnpm \
   && pnpm --version
 
 WORKDIR /openclaw
@@ -43,9 +42,6 @@ RUN pnpm ui:install && pnpm ui:build
 # Runtime image
 FROM node:22-bookworm
 ENV NODE_ENV=production
-
-RUN npm install -g pnpm \
-  && pnpm --version
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
