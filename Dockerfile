@@ -76,6 +76,12 @@ RUN rustup update stable \
 # Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
 RUN cargo install --git https://github.com/paradigmxyz/cryo --locked cryo_cli
 
+# Install gogcli (Google Suite CLI: Gmail, Calendar, Drive, Contacts, Tasks, etc.)
+ARG GOGCLI_VERSION=0.11.0
+RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_linux_amd64.tar.gz" \
+  | tar xz -C /usr/local/bin gog \
+  && gog --version
+
 # Install Claude Code CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.claude/local/bin:${PATH}"

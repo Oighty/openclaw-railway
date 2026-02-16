@@ -28,6 +28,23 @@ if [ -n "$GITHUB_EMAIL" ]; then
   git config --global user.email "$GITHUB_EMAIL" || true
 fi
 
+# gogcli: persist config/tokens in /data so they survive redeploys
+if command -v gog >/dev/null 2>&1; then
+  mkdir -p /data/gog-config
+  mkdir -p "$HOME/.config"
+  ln -sfn /data/gog-config "$HOME/.config/gog"
+  # Use encrypted file keyring (no OS keychain in containers)
+  export GOG_KEYRING_BACKEND="${GOG_KEYRING_BACKEND:-file}"
+  # Generate credentials.json from env vars if not already present
+  CREDS_FILE="/data/gog-config/credentials.json"
+  if [ -n "$GOG_CLIENT_ID" ] && [ -n "$GOG_CLIENT_SECRET" ] && [ ! -f "$CREDS_FILE" ]; then
+    cat > "$CREDS_FILE" <<GOGJSON
+{"installed":{"client_id":"${GOG_CLIENT_ID}","client_secret":"${GOG_CLIENT_SECRET}","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
+GOGJSON
+    echo "[gogcli] Generated credentials.json from GOG_CLIENT_ID/GOG_CLIENT_SECRET"
+  fi
+fi
+
 # QMD: initialize a markdown collection for this workspace (best-effort)
 # This enables fast local keyword search without expanding context.
 if command -v qmd >/dev/null 2>&1; then
