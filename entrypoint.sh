@@ -28,6 +28,15 @@ if [ -n "$GITHUB_EMAIL" ]; then
   git config --global user.email "$GITHUB_EMAIL" || true
 fi
 
+# gogcli: persist config/tokens in /data so they survive redeploys
+if command -v gog >/dev/null 2>&1; then
+  mkdir -p /data/gog-config
+  mkdir -p "$HOME/.config"
+  ln -sfn /data/gog-config "$HOME/.config/gog"
+  # Use encrypted file keyring (no OS keychain in containers)
+  export GOG_KEYRING_BACKEND="${GOG_KEYRING_BACKEND:-file}"
+fi
+
 # QMD: initialize a markdown collection for this workspace (best-effort)
 # This enables fast local keyword search without expanding context.
 if command -v qmd >/dev/null 2>&1; then
