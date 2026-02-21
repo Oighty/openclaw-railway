@@ -66,15 +66,21 @@ ENV PATH="/root/.bun/bin:${PATH}"
 RUN bun install -g github:tobi/qmd \
   && qmd --help >/dev/null
 
-# Install Rust toolchain + cryo CLI
+# Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup update stable \
   && rustup default stable \
   && rustc --version \
   && cargo --version
-# Install cryo from upstream git (newer lock/deps; avoids crates.io build failures on older transitive deps)
-RUN cargo install --git https://github.com/paradigmxyz/cryo --locked cryo_cli
+
+# Install Foundry (forge/cast/anvil/chisel)
+RUN curl -L https://foundry.paradigm.xyz | bash \
+  && /root/.foundry/bin/foundryup \
+  && /root/.foundry/bin/forge --version \
+  && /root/.foundry/bin/cast --version \
+  && /root/.foundry/bin/anvil --version
+ENV PATH="/root/.foundry/bin:${PATH}"
 
 # Install gogcli (Google Suite CLI: Gmail, Calendar, Drive, Contacts, Tasks, etc.)
 ARG GOGCLI_VERSION=0.11.0
