@@ -255,8 +255,6 @@ function tasksJsonPath() {
   return path.join(WORKSPACE_DIR, "tasks.json");
 }
 
-const FILES_ALLOWED_ROOTS = ["life", "tasks", "memory"];
-const FILES_ALLOWED_FILES = ["MEMORY.md"];
 const FILES_MARKDOWN_EXTS = new Set([".md", ".markdown"]);
 
 function normalizeRelPath(p) {
@@ -269,8 +267,9 @@ function normalizeRelPath(p) {
 function isAllowedFilesPath(relPath) {
   const rel = normalizeRelPath(relPath);
   if (!rel) return false;
-  if (FILES_ALLOWED_FILES.includes(rel)) return true;
-  return FILES_ALLOWED_ROOTS.some((root) => rel === root || rel.startsWith(`${root}/`));
+  // allow any non-hidden path under workspace
+  const segments = rel.split("/");
+  return segments.every((s) => s && !s.startsWith("."));
 }
 
 function resolveAllowedWorkspacePath(relPath) {
@@ -324,27 +323,36 @@ function listFilesTree() {
     };
   }
 
+  const rootEntries = fs.readdirSync(WORKSPACE_DIR, { withFileTypes: true });
   const roots = [];
-  for (const root of FILES_ALLOWED_ROOTS) {
-    const abs = path.join(WORKSPACE_DIR, root);
-    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
-      const node = walkRel(root);
-      if (node) roots.push(node);
-    }
-  }
 
-  for (const fileRel of FILES_ALLOWED_FILES) {
-    const abs = path.join(WORKSPACE_DIR, fileRel);
-    const ext = path.extname(fileRel).toLowerCase();
-    if (fs.existsSync(abs) && fs.statSync(abs).isFile() && FILES_MARKDOWN_EXTS.has(ext)) {
+  for (const entry of rootEntries) {
+    if (entry.name.startsWith(".")) continue;
+    const rel = normalizeRelPath(entry.name);
+    const abs = path.join(WORKSPACE_DIR, rel);
+
+    if (entry.isDirectory()) {
+      const node = walkRel(rel);
+      if (node) roots.push(node);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!FILES_MARKDOWN_EXTS.has(ext)) continue;
       roots.push({
         type: "file",
-        name: path.basename(fileRel),
-        path: fileRel,
+        name: entry.name,
+        path: rel,
         ext,
       });
     }
   }
+
+  roots.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return roots;
 }
