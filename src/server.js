@@ -256,6 +256,7 @@ function tasksJsonPath() {
 }
 
 const FILES_MARKDOWN_EXTS = new Set([".md", ".markdown"]);
+const FILES_BLOCKED_DIRS = new Set(["node_modules"]);
 
 function normalizeRelPath(p) {
   return String(p || "")
@@ -267,9 +268,9 @@ function normalizeRelPath(p) {
 function isAllowedFilesPath(relPath) {
   const rel = normalizeRelPath(relPath);
   if (!rel) return false;
-  // allow any non-hidden path under workspace
+  // allow any non-hidden path under workspace, except blocked directories
   const segments = rel.split("/");
-  return segments.every((s) => s && !s.startsWith("."));
+  return segments.every((s) => s && !s.startsWith(".") && !FILES_BLOCKED_DIRS.has(s));
 }
 
 function resolveAllowedWorkspacePath(relPath) {
@@ -294,6 +295,7 @@ function listFilesTree() {
     const children = [];
     for (const entry of entries) {
       if (entry.name.startsWith(".")) continue;
+      if (entry.isDirectory() && FILES_BLOCKED_DIRS.has(entry.name)) continue;
       const childRel = normalizeRelPath(path.join(relPath, entry.name));
       if (entry.isDirectory()) {
         const sub = walkRel(childRel);
@@ -328,6 +330,7 @@ function listFilesTree() {
 
   for (const entry of rootEntries) {
     if (entry.name.startsWith(".")) continue;
+    if (entry.isDirectory() && FILES_BLOCKED_DIRS.has(entry.name)) continue;
     const rel = normalizeRelPath(entry.name);
     const abs = path.join(WORKSPACE_DIR, rel);
 
