@@ -6,6 +6,7 @@ import path from "node:path";
 
 import express from "express";
 import httpProxy from "http-proxy";
+import ignore from "ignore";
 import * as tar from "tar";
 
 // Railway deployments sometimes inject PORT=3000 by default. We want the wrapper to
@@ -256,7 +257,43 @@ function tasksJsonPath() {
 }
 
 const FILES_MARKDOWN_EXTS = new Set([".md", ".markdown"]);
-const FILES_BLOCKED_DIRS = new Set(["node_modules"]);
+const FILES_ALWAYS_BLOCKED_DIRS = new Set([".git"]);
+
+let filesGitignoreCache = { mtimeMs: -1, matcher: ignore() };
+
+function getFilesGitignoreMatcher() {
+  const gitignorePath = path.join(WORKSPACE_DIR, ".gitignore");
+  let stat = null;
+  try {
+    stat = fs.statSync(gitignorePath);
+  } catch {
+    filesGitignoreCache = { mtimeMs: -1, matcher: ignore() };
+    return filesGitignoreCache.matcher;
+  }
+
+  if (filesGitignoreCache.mtimeMs === stat.mtimeMs) {
+    return filesGitignoreCache.matcher;
+  }
+
+  const matcher = ignore();
+  try {
+    const content = fs.readFileSync(gitignorePath, "utf8");
+    matcher.add(content);
+  } catch {
+    // best effort: keep empty matcher
+  }
+
+  filesGitignoreCache = { mtimeMs: stat.mtimeMs, matcher };
+  return matcher;
+}
+
+function isGitignored(relPath, isDirectory = false) {
+  const rel = normalizeRelPath(relPath);
+  if (!rel) return false;
+  const matcher = getFilesGitignoreMatcher();
+  const probe = isDirectory ? `${rel}/` : rel;
+  return matcher.ignores(probe);
+}
 
 function normalizeRelPath(p) {
   return String(p || "")
@@ -268,9 +305,11 @@ function normalizeRelPath(p) {
 function isAllowedFilesPath(relPath) {
   const rel = normalizeRelPath(relPath);
   if (!rel) return false;
-  // allow any non-hidden path under workspace, except blocked directories
+  // allow any non-hidden path under workspace, except always-blocked dirs and gitignored paths
   const segments = rel.split("/");
-  return segments.every((s) => s && !s.startsWith(".") && !FILES_BLOCKED_DIRS.has(s));
+  const structuralOk = segments.every((s) => s && !s.startsWith(".") && !FILES_ALWAYS_BLOCKED_DIRS.has(s));
+  if (!structuralOk) return false;
+  return !isGitignored(rel, false) && !isGitignored(rel, true);
 }
 
 function resolveAllowedWorkspacePath(relPath) {
@@ -295,8 +334,10 @@ function listFilesTree() {
     const children = [];
     for (const entry of entries) {
       if (entry.name.startsWith(".")) continue;
-      if (entry.isDirectory() && FILES_BLOCKED_DIRS.has(entry.name)) continue;
+      if (entry.isDirectory() && FILES_ALWAYS_BLOCKED_DIRS.has(entry.name)) continue;
       const childRel = normalizeRelPath(path.join(relPath, entry.name));
+      if (entry.isDirectory() && isGitignored(childRel, true)) continue;
+      if (entry.isFile() && isGitignored(childRel, false)) continue;
       if (entry.isDirectory()) {
         const sub = walkRel(childRel);
         if (sub) children.push(sub);
@@ -330,8 +371,10 @@ function listFilesTree() {
 
   for (const entry of rootEntries) {
     if (entry.name.startsWith(".")) continue;
-    if (entry.isDirectory() && FILES_BLOCKED_DIRS.has(entry.name)) continue;
+    if (entry.isDirectory() && FILES_ALWAYS_BLOCKED_DIRS.has(entry.name)) continue;
     const rel = normalizeRelPath(entry.name);
+    if (entry.isDirectory() && isGitignored(rel, true)) continue;
+    if (entry.isFile() && isGitignored(rel, false)) continue;
     const abs = path.join(WORKSPACE_DIR, rel);
 
     if (entry.isDirectory()) {
