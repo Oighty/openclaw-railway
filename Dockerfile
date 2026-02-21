@@ -91,9 +91,14 @@ RUN npm install -g ralphy-cli @openai/codex
 
 WORKDIR /app
 
-# Wrapper deps
-COPY package.json ./
-RUN npm install --omit=dev && npm cache clean --force
+# Wrapper deps + UI build
+COPY package.json package-lock.json ./
+RUN npm install
+
+COPY src ./src
+RUN npm run build:files-ui \
+  && npm prune --omit=dev \
+  && npm cache clean --force
 
 # Copy built openclaw
 COPY --from=openclaw-build /openclaw /openclaw
@@ -102,7 +107,6 @@ COPY --from=openclaw-build /openclaw /openclaw
 RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"' > /usr/local/bin/openclaw \
   && chmod +x /usr/local/bin/openclaw
 
-COPY src ./src
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -255,6 +255,100 @@ function tasksJsonPath() {
   return path.join(WORKSPACE_DIR, "tasks.json");
 }
 
+const FILES_ALLOWED_ROOTS = ["life", "tasks", "memory"];
+const FILES_ALLOWED_FILES = ["MEMORY.md"];
+const FILES_MARKDOWN_EXTS = new Set([".md", ".markdown"]);
+
+function normalizeRelPath(p) {
+  return String(p || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+}
+
+function isAllowedFilesPath(relPath) {
+  const rel = normalizeRelPath(relPath);
+  if (!rel) return false;
+  if (FILES_ALLOWED_FILES.includes(rel)) return true;
+  return FILES_ALLOWED_ROOTS.some((root) => rel === root || rel.startsWith(`${root}/`));
+}
+
+function resolveAllowedWorkspacePath(relPath) {
+  const rel = normalizeRelPath(relPath);
+  if (!isAllowedFilesPath(rel)) return null;
+  const abs = path.resolve(path.join(WORKSPACE_DIR, rel));
+  const root = path.resolve(WORKSPACE_DIR);
+  if (!(abs === root || abs.startsWith(root + path.sep))) return null;
+  return { rel, abs };
+}
+
+function listFilesTree() {
+  function walkRel(relPath) {
+    const absPath = path.join(WORKSPACE_DIR, relPath);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(absPath, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+
+    const children = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const childRel = normalizeRelPath(path.join(relPath, entry.name));
+      if (entry.isDirectory()) {
+        const sub = walkRel(childRel);
+        if (sub) children.push(sub);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!FILES_MARKDOWN_EXTS.has(ext)) continue;
+        children.push({
+          type: "file",
+          name: entry.name,
+          path: childRel,
+          ext,
+        });
+      }
+    }
+
+    children.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      type: "directory",
+      name: path.basename(relPath),
+      path: relPath,
+      children,
+    };
+  }
+
+  const roots = [];
+  for (const root of FILES_ALLOWED_ROOTS) {
+    const abs = path.join(WORKSPACE_DIR, root);
+    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+      const node = walkRel(root);
+      if (node) roots.push(node);
+    }
+  }
+
+  for (const fileRel of FILES_ALLOWED_FILES) {
+    const abs = path.join(WORKSPACE_DIR, fileRel);
+    const ext = path.extname(fileRel).toLowerCase();
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile() && FILES_MARKDOWN_EXTS.has(ext)) {
+      roots.push({
+        type: "file",
+        name: path.basename(fileRel),
+        path: fileRel,
+        ext,
+      });
+    }
+  }
+
+  return roots;
+}
+
 function readTasksState() {
   const p = tasksJsonPath();
   try {
@@ -1234,6 +1328,182 @@ app.post("/tasks/api/migrate", requireTasksAuth, async (_req, res) => {
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// --- Files GUI (knowledge management editor) ---
+
+app.get("/files/app.js", requireTasksAuth, (_req, res) => {
+  res.type("application/javascript");
+  res.send(fs.readFileSync(path.join(process.cwd(), "src", "files-app.js"), "utf8"));
+});
+
+app.get("/files", requireTasksAuth, (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Files</title>
+  <style>body{margin:0;background:#0b0f17;color:#e5e7eb;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}#root{height:100vh}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/files/app.js"></script>
+</body>
+</html>`);
+});
+
+app.get(/^\/files\/.+/, requireTasksAuth, (req, res, next) => {
+  // Deep-link support: /files/<path> opens the SPA (except /files/api/* and /files/app.js)
+  if (req.path.startsWith("/files/api/") || req.path === "/files/app.js") return next();
+  res.type("html").send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Files</title>
+  <style>body{margin:0;background:#0b0f17;color:#e5e7eb;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}#root{height:100vh}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/files/app.js"></script>
+</body>
+</html>`);
+});
+
+app.get("/files/api/tree", requireTasksAuth, (_req, res) => {
+  try {
+    res.json({ ok: true, roots: listFilesTree(), workspaceDir: WORKSPACE_DIR });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.get("/files/api/file", requireTasksAuth, (req, res) => {
+  try {
+    const rel = String(req.query.path || "");
+    const resolved = resolveAllowedWorkspacePath(rel);
+    if (!resolved) return res.status(400).json({ ok: false, error: "Path is not allowed" });
+    if (!fs.existsSync(resolved.abs) || !fs.statSync(resolved.abs).isFile()) {
+      return res.status(404).json({ ok: false, error: "File not found" });
+    }
+
+    const content = fs.readFileSync(resolved.abs, "utf8");
+    const stat = fs.statSync(resolved.abs);
+    const ext = path.extname(resolved.rel).toLowerCase();
+    const isMarkdown = FILES_MARKDOWN_EXTS.has(ext);
+    if (!isMarkdown) return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+
+    res.json({
+      ok: true,
+      file: {
+        path: resolved.rel,
+        content,
+        ext,
+        isMarkdown,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.put("/files/api/file", requireTasksAuth, (req, res) => {
+  try {
+    const rel = String(req.body?.path || "");
+    const content = String(req.body?.content ?? "");
+    const expectedMtimeMs = Number(req.body?.expectedMtimeMs ?? 0);
+
+    const resolved = resolveAllowedWorkspacePath(rel);
+    if (!resolved) return res.status(400).json({ ok: false, error: "Path is not allowed" });
+    if (!fs.existsSync(resolved.abs) || !fs.statSync(resolved.abs).isFile()) {
+      return res.status(404).json({ ok: false, error: "File not found" });
+    }
+    if (!FILES_MARKDOWN_EXTS.has(path.extname(resolved.rel).toLowerCase())) {
+      return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+    }
+
+    const current = fs.statSync(resolved.abs);
+    if (expectedMtimeMs > 0 && Math.abs(current.mtimeMs - expectedMtimeMs) > 0.5) {
+      return res.status(409).json({ ok: false, error: "File changed on disk", currentMtimeMs: current.mtimeMs });
+    }
+
+    const tmp = `${resolved.abs}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmp, resolved.abs);
+    const next = fs.statSync(resolved.abs);
+    return res.json({ ok: true, mtimeMs: next.mtimeMs, size: next.size });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post("/files/api/create", requireTasksAuth, (req, res) => {
+  try {
+    const rel = String(req.body?.path || "");
+    const kind = String(req.body?.kind || "file");
+    const initialContent = String(req.body?.content ?? "");
+    const resolved = resolveAllowedWorkspacePath(rel);
+    if (!resolved) return res.status(400).json({ ok: false, error: "Path is not allowed" });
+    if (fs.existsSync(resolved.abs)) return res.status(409).json({ ok: false, error: "Path already exists" });
+
+    fs.mkdirSync(path.dirname(resolved.abs), { recursive: true });
+    if (kind === "directory") {
+      fs.mkdirSync(resolved.abs, { recursive: false });
+    } else {
+      const ext = path.extname(resolved.rel).toLowerCase();
+      if (!FILES_MARKDOWN_EXTS.has(ext)) {
+        return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+      }
+      fs.writeFileSync(resolved.abs, initialContent, { encoding: "utf8", mode: 0o600 });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post("/files/api/rename", requireTasksAuth, (req, res) => {
+  try {
+    const fromRel = String(req.body?.from || "");
+    const toRel = String(req.body?.to || "");
+    const fromPath = resolveAllowedWorkspacePath(fromRel);
+    const toPath = resolveAllowedWorkspacePath(toRel);
+    if (!fromPath || !toPath) return res.status(400).json({ ok: false, error: "Path is not allowed" });
+    if (!fs.existsSync(fromPath.abs)) return res.status(404).json({ ok: false, error: "Source not found" });
+    if (fs.existsSync(toPath.abs)) return res.status(409).json({ ok: false, error: "Destination exists" });
+
+    const fromStat = fs.statSync(fromPath.abs);
+    if (fromStat.isFile()) {
+      const fromExt = path.extname(fromPath.rel).toLowerCase();
+      const toExt = path.extname(toPath.rel).toLowerCase();
+      if (!FILES_MARKDOWN_EXTS.has(fromExt) || !FILES_MARKDOWN_EXTS.has(toExt)) {
+        return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+      }
+    }
+
+    fs.mkdirSync(path.dirname(toPath.abs), { recursive: true });
+    fs.renameSync(fromPath.abs, toPath.abs);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post("/files/api/delete", requireTasksAuth, (req, res) => {
+  try {
+    const rel = String(req.body?.path || "");
+    const resolved = resolveAllowedWorkspacePath(rel);
+    if (!resolved) return res.status(400).json({ ok: false, error: "Path is not allowed" });
+    if (!fs.existsSync(resolved.abs)) return res.status(404).json({ ok: false, error: "Path not found" });
+
+    fs.rmSync(resolved.abs, { recursive: true, force: false });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
   }
 });
 
