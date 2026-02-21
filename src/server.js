@@ -257,6 +257,7 @@ function tasksJsonPath() {
 
 const FILES_ALLOWED_ROOTS = ["life", "tasks", "memory"];
 const FILES_ALLOWED_FILES = ["MEMORY.md"];
+const FILES_MARKDOWN_EXTS = new Set([".md", ".markdown"]);
 
 function normalizeRelPath(p) {
   return String(p || "")
@@ -299,11 +300,13 @@ function listFilesTree() {
         const sub = walkRel(childRel);
         if (sub) children.push(sub);
       } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!FILES_MARKDOWN_EXTS.has(ext)) continue;
         children.push({
           type: "file",
           name: entry.name,
           path: childRel,
-          ext: path.extname(entry.name).toLowerCase(),
+          ext,
         });
       }
     }
@@ -332,12 +335,13 @@ function listFilesTree() {
 
   for (const fileRel of FILES_ALLOWED_FILES) {
     const abs = path.join(WORKSPACE_DIR, fileRel);
-    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+    const ext = path.extname(fileRel).toLowerCase();
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile() && FILES_MARKDOWN_EXTS.has(ext)) {
       roots.push({
         type: "file",
         name: path.basename(fileRel),
         path: fileRel,
-        ext: path.extname(fileRel).toLowerCase(),
+        ext,
       });
     }
   }
@@ -1388,7 +1392,8 @@ app.get("/files/api/file", requireTasksAuth, (req, res) => {
     const content = fs.readFileSync(resolved.abs, "utf8");
     const stat = fs.statSync(resolved.abs);
     const ext = path.extname(resolved.rel).toLowerCase();
-    const isMarkdown = ext === ".md" || ext === ".markdown";
+    const isMarkdown = FILES_MARKDOWN_EXTS.has(ext);
+    if (!isMarkdown) return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
 
     res.json({
       ok: true,
@@ -1416,6 +1421,9 @@ app.put("/files/api/file", requireTasksAuth, (req, res) => {
     if (!resolved) return res.status(400).json({ ok: false, error: "Path is not allowed" });
     if (!fs.existsSync(resolved.abs) || !fs.statSync(resolved.abs).isFile()) {
       return res.status(404).json({ ok: false, error: "File not found" });
+    }
+    if (!FILES_MARKDOWN_EXTS.has(path.extname(resolved.rel).toLowerCase())) {
+      return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
     }
 
     const current = fs.statSync(resolved.abs);
@@ -1446,6 +1454,10 @@ app.post("/files/api/create", requireTasksAuth, (req, res) => {
     if (kind === "directory") {
       fs.mkdirSync(resolved.abs, { recursive: false });
     } else {
+      const ext = path.extname(resolved.rel).toLowerCase();
+      if (!FILES_MARKDOWN_EXTS.has(ext)) {
+        return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+      }
       fs.writeFileSync(resolved.abs, initialContent, { encoding: "utf8", mode: 0o600 });
     }
     return res.json({ ok: true });
@@ -1463,6 +1475,15 @@ app.post("/files/api/rename", requireTasksAuth, (req, res) => {
     if (!fromPath || !toPath) return res.status(400).json({ ok: false, error: "Path is not allowed" });
     if (!fs.existsSync(fromPath.abs)) return res.status(404).json({ ok: false, error: "Source not found" });
     if (fs.existsSync(toPath.abs)) return res.status(409).json({ ok: false, error: "Destination exists" });
+
+    const fromStat = fs.statSync(fromPath.abs);
+    if (fromStat.isFile()) {
+      const fromExt = path.extname(fromPath.rel).toLowerCase();
+      const toExt = path.extname(toPath.rel).toLowerCase();
+      if (!FILES_MARKDOWN_EXTS.has(fromExt) || !FILES_MARKDOWN_EXTS.has(toExt)) {
+        return res.status(400).json({ ok: false, error: "Only markdown files are supported in V1" });
+      }
+    }
 
     fs.mkdirSync(path.dirname(toPath.abs), { recursive: true });
     fs.renameSync(fromPath.abs, toPath.abs);

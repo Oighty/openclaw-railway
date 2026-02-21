@@ -10,7 +10,7 @@
     "start": "node src/server.js",
     "lint": "node -c src/server.js",
     "smoke": "node scripts/smoke.js",
-    "build:files-ui": "esbuild src/files-ui/main.tsx --bundle --format=iife --platform=browser --target=es2020 --outfile=src/files-app.js"
+    "build:files-ui": "npx esbuild src/files-ui/main.tsx --bundle --format=iife --platform=browser --target=es2020 --outfile=src/files-app.js"
   },
   "dependencies": {
     "@tiptap/pm": "^3.20.0",
